@@ -1,0 +1,276 @@
+# configs/raw_data_schema.yaml
+
+version: "1.1"
+description: "Raw data schema definitions for the data lake/warehouse."
+
+tables:
+  # ---------------------------------------------------------
+  # 訂單資料 for train.py and test.py
+  # ---------------------------------------------------------
+  # ---------------------------------------------------------
+  # 餐廳訂位主檔 (Restaurant Bookings)
+  # ---------------------------------------------------------
+  bookings:
+    description: "Main restaurant reservation records including customer attributes and return status."
+    source_format: "csv"
+    encoding: "utf-8"
+    columns:
+      - name: "booking_id"
+        type: "int"
+        nullable: false
+        primary_key: true
+        description: "系統生成的唯一訂位編號"
+
+      - name: "member_id"
+        type: "string"
+        nullable: false
+        description: "會員唯一識別碼 (Hash string)"
+
+      - name: "cdate"
+        type: "datetime"
+        # 時間格式比較特殊，包含雙逗號與AM/PM，如 "7/24/2013,,11:30:00,PM"
+        format: "%m/%d/%Y,,%I:%M:%S,%p"
+        nullable: false
+        description: "該筆訂位的建立時間 (Creation Date)"
+
+      - name: "restaurant_id"
+        type: "string"
+        nullable: false
+        description: "餐廳分店的唯一識別碼 (Hash string)"
+
+      - name: "datetime"
+        type: "datetime"
+        format: "%m/%d/%Y,,%I:%M:%S,%p"
+        nullable: false
+        description: "實際預計用餐的時間"
+
+      - name: "people"
+        type: "int"
+        nullable: false
+        range: [1, 50] # 可視餐廳容留人數上限調整
+        description: "訂位人數"
+
+      - name: "purpose"
+        type: "category"
+        nullable: true
+        allowed_values: ["家人用餐", "朋友聚餐", "甜蜜紀念日", "生日慶祝"]
+        description: "用餐目的"
+
+      - name: "gender"
+        type: "category"
+        nullable: true
+        allowed_values: ["M", "F"]
+        description: "訂位者性別"
+
+      - name: "status"
+        type: "category"
+        nullable: false
+        allowed_values: ["ok", "canceled"]
+        description: "訂位最終狀態"
+
+      - name: "is_required_prepay_satisfied"
+        type: "int"
+        nullable: false
+        allowed_values: [0, 1]
+        description: "是否滿足預付訂金條件 (Boolean-like integer)"
+
+      - name: "return90"
+        type: "int"
+        nullable: false
+        allowed_values: [0, 1]
+        description: "Target Variable: 90天內是否再次回流 (1: Yes, 0: No)"
+
+  # ---------------------------------------------------------
+  # 會員主檔 (Members)
+  # ---------------------------------------------------------
+  members:
+    description: "Customer profile, demographics, and third-party login bindings."
+    source_format: "csv"
+    encoding: "utf-8"
+    columns:
+      - name: "id"
+        type: "string"
+        nullable: false
+        primary_key: true
+        description: "會員唯一識別碼 (作為 Foreign Key 對應 bookings 表的 member_id)"
+
+      - name: "is_vip"
+        type: "int"
+        nullable: false
+        allowed_values: [0, 1]
+        description: "是否為 VIP 會員 (1: Yes, 0: No)"
+
+      - name: "gender"
+        type: "category"
+        nullable: true
+        allowed_values: ["M", "F"]
+        description: "性別"
+
+      - name: "birthdate"
+        type: "string" #故意設為 string 而非 datetime
+        nullable: true
+        description: "會員生日。注意：包含無效日期 '0000-00-00'，需在 ETL 階段轉換為 NaN 或特定預設值"
+
+      - name: "city"
+        type: "category"
+        nullable: true
+        description: "居住縣市。注意：包含異常值 '0'（推測為未填寫），且包含舊制縣市名稱（如桃園縣）"
+
+      - name: "has_google"
+        type: "int"
+        nullable: false
+        allowed_values: [0, 1]
+        description: "是否綁定 Google 帳號"
+
+      - name: "has_yahoo"
+        type: "int"
+        nullable: false
+        allowed_values: [0, 1]
+        description: "是否綁定 Yahoo 帳號"
+
+      - name: "has_weibo"
+        type: "int"
+        nullable: false
+        allowed_values: [0, 1]
+        description: "是否綁定 Weibo 帳號"
+
+      - name: "cdate"
+        type: "datetime"
+        # example "4/1/2012 0:..." (Month/Day/Year Hour:Minute)
+        format: "%m/%d/%Y %H:%M"
+        nullable: false
+        description: "會員註冊/建立時間"
+
+  # ---------------------------------------------------------
+  # 餐廳主檔 (Restaurants)
+  # ---------------------------------------------------------
+  restaurants:
+    description: "Restaurant entity data including location, pricing, and facilities."
+    source_format: "csv"
+    encoding: "utf-8"
+    columns:
+      - name: "id"
+        type: "string"
+        nullable: false
+        primary_key: true
+        description: "餐廳唯一識別碼 (對應 bookings 表的 restaurant_id)"
+
+      - name: "is_hotel"
+        type: "int"
+        nullable: false
+        allowed_values: [0, 1]
+        description: "是否附屬於飯店內"
+
+      - name: "country"
+        type: "category"
+        nullable: true
+        description: "國家代碼 (如: tw)"
+
+      - name: "currency"
+        type: "category"
+        nullable: true
+        description: "使用貨幣 (如: TWD)"
+
+      - name: "city"
+        type: "category"
+        nullable: true
+        description: "所在城市 (如: 新北市, 台中市)"
+
+      - name: "cityarea"
+        type: "string"
+        nullable: true
+        description: "所在行政區。※包含前端未防呆的髒資料 '請選擇'，需在 ETL 清洗為 NaN"
+
+      - name: "name"
+        type: "string"
+        nullable: false
+        description: "餐廳名稱 (Hash string)"
+
+      - name: "abbr"
+        type: "string"
+        nullable: true
+        description: "餐廳簡稱 (Hash string)"
+
+      - name: "tel"
+        type: "string"
+        nullable: true
+        description: "聯絡電話"
+
+      - name: "opening_hours"
+        type: "string"
+        nullable: true
+        description: "營業時間。※注意：為高度非結構化的長文本，若要作為特徵需另外寫 Regex 萃取"
+
+      - name: "good_for_family"
+        type: "int"
+        nullable: true
+        allowed_values: [0, 1]
+        description: "是否適合家庭聚餐"
+
+      - name: "accept_credit_card"
+        type: "int"
+        nullable: true
+        allowed_values: [0, 1]
+        description: "是否接受信用卡"
+
+      - name: "parking"
+        type: "int"
+        nullable: true
+        allowed_values: [0, 1]
+        description: "是否有停車場"
+
+      - name: "outdoor_seating"
+        type: "int"
+        nullable: true
+        allowed_values: [0, 1]
+        description: "是否有戶外座位"
+
+      - name: "wifi"
+        type: "int"
+        nullable: true
+        allowed_values: [0, 1]
+        description: "是否提供 WiFi"
+
+      - name: "wheelchair_accessible"
+        type: "int"
+        nullable: true
+        allowed_values: [0, 1]
+        description: "是否為無障礙空間"
+
+      - name: "price1"
+        type: "float"
+        nullable: true
+        description: "價格區間下限或特定定價"
+
+      - name: "price2"
+        type: "float"
+        nullable: true
+        description: "價格區間上限或特定定價"
+
+      - name: "lat"
+        type: "float"
+        nullable: true
+        range: [-90.0, 90.0]
+        description: "緯度 (Latitude)"
+
+      - name: "lng"
+        type: "float"
+        nullable: true
+        range: [-180.0, 180.0]
+        description: "經度 (Longitude)"
+
+      - name: "timezone"
+        type: "category"
+        nullable: true
+        description: "時區 (如: Asia/Taipei)"
+
+      - name: "locale"
+        type: "category"
+        nullable: true
+        description: "語系 (如: zh_TW)"
+
+      - name: "cdate"
+        type: "datetime"
+        format: "%m/%d/%Y %H:%M"
+        nullable: false
+        description: "餐廳資料建立時間"
