@@ -22,16 +22,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def clean_order(input_path: Path, output_path: Path) -> None:
-    """Cleans the order dataset and saves it as an interim file.
+def clean_order(df: pd.DataFrame) -> pd.DataFrame:
+    """Cleans the order dataset.
 
     Args:
-        input_path: Path to the raw train.csv file.
-        output_path: Path to save the cleaned train_silver.csv file.
-    """
-    logger.info("Loading raw order data from %s", input_path)
-    order_df = pd.read_csv(input_path, sep="\t", encoding="utf-16", on_bad_lines="warn")
+        df: Raw order DataFrame.
 
+    Returns:
+        Cleaned order DataFrame.
+    """
     purpose_mapping = {
         "請選擇": "Unknown",
         "Please,Select": "Unknown",
@@ -49,8 +48,8 @@ def clean_order(input_path: Path, output_path: Path) -> None:
     }
 
     logger.info("Applying cleaning pipeline on order data.")
-    order_final = (
-        order_df.pipe(fill_missing_values, col_name="purpose", fill_value="Unknown")
+    return (
+        df.pipe(fill_missing_values, col_name="purpose", fill_value="Unknown")
         .pipe(parse_datetime_column, col_name="cdate")
         .pipe(parse_datetime_column, col_name="datetime")
         .pipe(trim_whitespace, col_name="purpose")
@@ -65,28 +64,22 @@ def clean_order(input_path: Path, output_path: Path) -> None:
         .pipe(convert_to_category, col_name="status")
     )
 
-    logger.info("Saving cleaned order data to %s", output_path)
-    order_final.to_csv(output_path, index=False, sep=",", encoding="utf-8")
 
-
-def clean_restaurant(input_path: Path, output_path: Path) -> None:
-    """Cleans the restaurant dataset and saves it as an interim file.
+def clean_restaurant(df: pd.DataFrame) -> pd.DataFrame:
+    """Cleans the restaurant dataset.
 
     Args:
-        input_path: Path to the raw restaurant_revised.csv file.
-        output_path: Path to save the cleaned restaurant_silver.csv file.
-    """
-    logger.info("Loading raw restaurant data from %s", input_path)
-    restaurant_df = pd.read_csv(
-        input_path, sep="\t", encoding="utf-16", on_bad_lines="warn"
-    )
+        df: Raw restaurant DataFrame.
 
+    Returns:
+        Cleaned restaurant DataFrame.
+    """
     city_mapping = {"桃園縣": "桃園市", "%": "Unknown"}
     cityarea_mapping = {"請選擇": "Unknown"}
 
     logger.info("Applying cleaning pipeline on restaurant data.")
-    restaurant_final = (
-        restaurant_df.pipe(fill_missing_values, col_name="cityarea", fill_value="Unknown")
+    return (
+        df.pipe(fill_missing_values, col_name="cityarea", fill_value="Unknown")
         .pipe(parse_datetime_column, col_name="cdate")
         .pipe(map_categorical_values, col_name="city", mapping=city_mapping)
         .pipe(map_categorical_values, col_name="cityarea", mapping=cityarea_mapping)
@@ -98,42 +91,33 @@ def clean_restaurant(input_path: Path, output_path: Path) -> None:
         .pipe(convert_to_category, col_name="locale")
     )
 
-    logger.info("Saving cleaned restaurant data to %s", output_path)
-    restaurant_final.to_csv(output_path, index=False, sep=",", encoding="utf-8")
 
-
-def clean_member(input_path: Path, output_path: Path) -> None:
-    """Cleans the member dataset and saves it as an interim file.
+def clean_member(df: pd.DataFrame) -> pd.DataFrame:
+    """Cleans the member dataset.
 
     Args:
-        input_path: Path to the raw member.csv file.
-        output_path: Path to save the cleaned member_silver.csv file.
-    """
-    logger.info("Loading raw member data from %s", input_path)
-    member_df = pd.read_csv(
-        input_path, sep="\t", encoding="utf-16", on_bad_lines="warn"
-    )
+        df: Raw member DataFrame.
 
+    Returns:
+        Cleaned member DataFrame.
+    """
     member_city_mapping = {"桃園縣": "桃園市", "0": "Unknown", 0: "Unknown"}
 
     logger.info("Applying cleaning pipeline on member data.")
-    member_final = (
-        member_df.pipe(fill_missing_values, col_name="city", fill_value="Unknown")
+    return (
+        df.pipe(fill_missing_values, col_name="city", fill_value="Unknown")
         .pipe(fill_missing_values, col_name="gender", fill_value="Unknown")
         .pipe(parse_datetime_column, col_name="birthdate")
         .pipe(parse_datetime_column, col_name="cdate")
         .pipe(
             remove_specific_value_str,
             col_name="city",
-            value="??蝮?>??蝮?/option><option value",
+            value="??蝮?>??蝮?/option><option value",
         )
         .pipe(map_categorical_values, col_name="city", mapping=member_city_mapping)
         .pipe(convert_to_category, col_name="gender")
         .pipe(convert_to_category, col_name="city")
     )
-
-    logger.info("Saving cleaned member data to %s", output_path)
-    member_final.to_csv(output_path, index=False, sep=",", encoding="utf-8")
 
 
 def main() -> None:
@@ -153,18 +137,24 @@ def main() -> None:
     interim_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        clean_order(
-            input_path=raw_dir / "train.csv",
-            output_path=interim_dir / "train_silver.csv",
-        )
-        clean_restaurant(
-            input_path=raw_dir / "restaurant_revised.csv",
-            output_path=interim_dir / "restaurant_silver.csv",
-        )
-        clean_member(
-            input_path=raw_dir / "member.csv",
-            output_path=interim_dir / "member_silver.csv",
-        )
+        logger.info("Loading raw order data from %s", raw_dir / "train.csv")
+        order_df = pd.read_csv(raw_dir / "train.csv", sep="\t", encoding="utf-16", on_bad_lines="warn")
+        order_final = clean_order(order_df)
+        logger.info("Saving cleaned order data to %s", interim_dir / "train_silver.csv")
+        order_final.to_csv(interim_dir / "train_silver.csv", index=False, sep=",", encoding="utf-8")
+
+        logger.info("Loading raw restaurant data from %s", raw_dir / "restaurant_revised.csv")
+        restaurant_df = pd.read_csv(raw_dir / "restaurant_revised.csv", sep="\t", encoding="utf-16", on_bad_lines="warn")
+        restaurant_final = clean_restaurant(restaurant_df)
+        logger.info("Saving cleaned restaurant data to %s", interim_dir / "restaurant_silver.csv")
+        restaurant_final.to_csv(interim_dir / "restaurant_silver.csv", index=False, sep=",", encoding="utf-8")
+
+        logger.info("Loading raw member data from %s", raw_dir / "member.csv")
+        member_df = pd.read_csv(raw_dir / "member.csv", sep="\t", encoding="utf-16", on_bad_lines="warn")
+        member_final = clean_member(member_df)
+        logger.info("Saving cleaned member data to %s", interim_dir / "member_silver.csv")
+        member_final.to_csv(interim_dir / "member_silver.csv", index=False, sep=",", encoding="utf-8")
+
         logger.info("Data cleaning completed successfully.")
     except Exception as e:
         logger.error("An error occurred during data cleaning: %s", e)

@@ -13,7 +13,7 @@ def lead_time(
     booking_time: str, 
     reservation_time: str
 ) -> pd.DataFrame:
-    """Calculates the lead time (in days) between booking and reservation.
+    """Calculates the lead time (in hours) between booking and reservation.
 
     Args:
         df: The input pandas DataFrame.
@@ -31,7 +31,7 @@ def lead_time(
     if not pd.api.types.is_datetime64_any_dtype(result_df[reservation_time]):
         result_df[reservation_time] = pd.to_datetime(result_df[reservation_time], errors='coerce')
         
-    result_df['lead_time'] = (result_df[reservation_time] - result_df[booking_time]).dt.days
+    result_df['lead_time'] = (result_df[reservation_time] - result_df[booking_time]).dt.total_seconds() / 3600
     return result_df
 
 def calculate_age(
@@ -58,31 +58,81 @@ def calculate_age(
         result_df[ref_date_col] = pd.to_datetime(result_df[ref_date_col], errors='coerce')
         
     result_df['age'] = result_df[ref_date_col].dt.year - result_df[birth_date_col].dt.year
+    
+    # Explicitly set age to NaN where either date is missing
+    missing_mask = result_df[birth_date_col].isna() | result_df[ref_date_col].isna()
+    result_df.loc[missing_mask, 'age'] = np.nan
+    
     return result_df
 
-def booking_hour(df: pd.DataFrame, datetime_col: str) -> pd.DataFrame:
-    """Extracts the hour from a datetime column and applies one-hot encoding.
+def extract_hour(df: pd.DataFrame, datetime_col: str, output_col: str = "hour") -> pd.DataFrame:
+    """Extracts the hour (0-23) from a datetime column.
 
     Args:
         df: The input pandas DataFrame.
         datetime_col: The datetime column to extract the hour from.
+        output_col: Name of the output column.
 
     Returns:
-        A new DataFrame with one-hot encoded 'hour_X' columns.
+        A new DataFrame with an added hour column.
     """
-    logger.debug("Extracting booking hour features.")
+    logger.debug("Extracting hour from '%s' into '%s'.", datetime_col, output_col)
     result_df = df.copy()
-    
+
     if not pd.api.types.is_datetime64_any_dtype(result_df[datetime_col]):
         result_df[datetime_col] = pd.to_datetime(result_df[datetime_col], errors='coerce')
-        
-    hour_series = result_df[datetime_col].dt.hour
-    for h in range(24):
-        result_df[f'hour_{h}'] = (hour_series == h).astype(int)
+
+    result_df[output_col] = result_df[datetime_col].dt.hour
+    return result_df
+
+
+def extract_half_hour_slot(df: pd.DataFrame, datetime_col: str, output_col: str = "half_hour_slot") -> pd.DataFrame:
+    """Extracts the half-hour slot index (0-47) from a datetime column.
+
+    Slot 0 = 00:00-00:29, slot 1 = 00:30-00:59, ..., slot 47 = 23:30-23:59.
+
+    Args:
+        df: The input pandas DataFrame.
+        datetime_col: The datetime column to extract from.
+        output_col: Name of the output column.
+
+    Returns:
+        A new DataFrame with an added half-hour slot column.
+    """
+    logger.debug("Extracting half-hour slot from '%s' into '%s'.", datetime_col, output_col)
+    result_df = df.copy()
+
+    if not pd.api.types.is_datetime64_any_dtype(result_df[datetime_col]):
+        result_df[datetime_col] = pd.to_datetime(result_df[datetime_col], errors='coerce')
+
+    dt = result_df[datetime_col]
+    result_df[output_col] = dt.dt.hour * 2 + dt.dt.minute // 30
+    return result_df
+
+
+def extract_seconds_of_day(df: pd.DataFrame, datetime_col: str, output_col: str = "seconds_of_day") -> pd.DataFrame:
+    """Extracts seconds since midnight (0-86399) from a datetime column.
+
+    Args:
+        df: The input pandas DataFrame.
+        datetime_col: The datetime column to extract from.
+        output_col: Name of the output column.
+
+    Returns:
+        A new DataFrame with an added seconds-of-day column.
+    """
+    logger.debug("Extracting seconds of day from '%s' into '%s'.", datetime_col, output_col)
+    result_df = df.copy()
+
+    if not pd.api.types.is_datetime64_any_dtype(result_df[datetime_col]):
+        result_df[datetime_col] = pd.to_datetime(result_df[datetime_col], errors='coerce')
+
+    dt = result_df[datetime_col]
+    result_df[output_col] = dt.dt.hour * 3600 + dt.dt.minute * 60 + dt.dt.second
     return result_df
 
 def weekday(df: pd.DataFrame, datetime_col: str) -> pd.DataFrame:
-    """Extracts the weekday (0=Monday, 6=Sunday) from a datetime column.
+    """Extracts the weekday (1=Monday, 7=Sunday) from a datetime column.
 
     Args:
         df: The input pandas DataFrame.
@@ -93,11 +143,11 @@ def weekday(df: pd.DataFrame, datetime_col: str) -> pd.DataFrame:
     """
     logger.debug("Extracting weekday feature.")
     result_df = df.copy()
-    
+
     if not pd.api.types.is_datetime64_any_dtype(result_df[datetime_col]):
         result_df[datetime_col] = pd.to_datetime(result_df[datetime_col], errors='coerce')
-        
-    result_df['weekday'] = result_df[datetime_col].dt.dayofweek
+
+    result_df['weekday'] = result_df[datetime_col].dt.dayofweek + 1
     return result_df
 
 def average_price(

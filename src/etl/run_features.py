@@ -9,10 +9,12 @@ import pandas as pd
 from src.etl._features_utils import (
     area_restaurant_density,
     average_price,
-    booking_hour,
     calculate_age,
     days_from_payday,
     drop_columns,
+    extract_half_hour_slot,
+    extract_hour,
+    extract_seconds_of_day,
     is_holiday_vicinity,
     lead_time,
     rename_columns,
@@ -48,7 +50,10 @@ def transform_features(df: pd.DataFrame) -> pd.DataFrame:
     df_engineered = (
         df.pipe(lead_time, booking_time="cdate", reservation_time="datetime")
         .pipe(calculate_age, birth_date_col="birthdate", ref_date_col="datetime")
-        .pipe(booking_hour, datetime_col="datetime")
+        .pipe(extract_hour, datetime_col="cdate", output_col="booking_hour")
+        .pipe(extract_hour, datetime_col="datetime", output_col="reservation_hour")
+        .pipe(extract_seconds_of_day, datetime_col="datetime", output_col="reservation_seconds")
+        .pipe(extract_half_hour_slot, datetime_col="datetime", output_col="reservation_half_hour")
         .pipe(weekday, datetime_col="datetime")
         .pipe(average_price, price1_col="price1", price2_col="price2")
         .pipe(is_holiday_vicinity, datetime_col="datetime", holiday_list=holidays_2014)
@@ -79,7 +84,7 @@ def transform_features(df: pd.DataFrame) -> pd.DataFrame:
             'birthdate': 'member_birthdate',
             'member_city': 'member_city_code'
         })
-        .pipe(drop_columns, cols_to_drop=['booking_id', 'member_id', 'restaurant_id'])
+        .pipe(drop_columns, cols_to_drop=['booking_id', 'member_id', 'restaurant_id','booking_status','return90','min_price','max_price'])
     )
     
     logger.info("Feature engineering pipeline applied successfully.")
