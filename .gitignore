@@ -8,3 +8,13 @@ wheels/
 
 # Virtual environments
 .venv
+
+# MLflow
+mlruns/
+mlflow.db
+
+# Claude Code
+.claude/
+
+# Scratch notebooks
+notebooks/work.ipynb
