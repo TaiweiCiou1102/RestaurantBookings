@@ -1,0 +1,122 @@
+{
+  "info": {
+    "_postman_id": "fa07d8d5-b2fe-455b-9f6d-c13c981b83df",
+    "name": "RestaurantBooking",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "25223331"
+  },
+  "item": [
+    {
+      "name": "chat",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "const restaurantData = {\r",
+              "    \"restaurant_id\":\"\",\r",
+              "    \"restaurant_name\":\"（未選擇餐廳）\",\r",
+              "    \"hotel_restaurant\":0,\"city_code\":\"台北市\",\"city_area_code\":\"Unknown\",\"family_friendly\":1,\"accepts_credit_card\":1,\"has_parking\":0,\"outdoor_seating\":0,\"has_wifi\":1,\"wheelchair_accessible\":0,\"lat\":25.05,\"lng\":121.52,\"avg_price\":500,\"popular_hour\":18,\"dinner_ratio\":0.5,\"restaurant_density\":14};\r",
+              "\r",
+              "const userData = {\"is_vip_member\":0,\"account_gender\":\"M\",\"member_city_code\":\"台北市\",\"birthdate\":\"2008-11-07\",\"dining_purpose\":\"家人用餐\",\"booked_by_gender\":\"M\",\"prepay_satisfied\":1};\r",
+              "\r",
+              "// 將這兩個物件轉為 JSON 字串，並存入 Postman 的變數中\r",
+              "pm.variables.set(\"RestaurantParams\", JSON.stringify(restaurantData));\r",
+              "pm.variables.set(\"UserParams\", JSON.stringify(userData));"
+            ],
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {}
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n    \"message\":\"我想要訂明天中午12點的位置，50個人,邱泰瑋 0963696686\",\r\n    \"session_id\":\"{{Session}}\",\r\n    \"restaurant_params\":{{RestaurantParams}},\r\n    \"user_params\":{{UserParams}}\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://restaurant-booking-taiwei-fastapi.azurewebsites.net/api/v1/chat",
+          "protocol": "https",
+          "host": [
+            "restaurant-booking-taiwei-fastapi",
+            "azurewebsites",
+            "net"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "chat"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "session",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// 1. 將 API 回傳的回應解析為 JSON 格式\r",
+              "const responseData = pm.response.json();\r",
+              "\r",
+              "// 2. 檢查回傳的資料中是否包含 session_id\r",
+              "if (responseData.session_id) {\r",
+              "    // 3. 將 session_id 的值設定到名為 \"Session\" 的環境變數中\r",
+              "    pm.environment.set(\"Session\", responseData.session_id);\r",
+              "    \r",
+              "    // (可選) 在 Postman Console 印出日誌，方便除錯\r",
+              "    console.log(\"已成功將 Session 環境變數設定為: \" + responseData.session_id);\r",
+              "} else {\r",
+              "    console.error(\"在回應中找不到 session_id\");\r",
+              "}"
+            ],
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {}
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://restaurant-booking-taiwei-fastapi.azurewebsites.net/api/v1/session",
+          "protocol": "https",
+          "host": [
+            "restaurant-booking-taiwei-fastapi",
+            "azurewebsites",
+            "net"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "session"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

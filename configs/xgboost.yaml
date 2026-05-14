@@ -1,0 +1,38 @@
+model_params:
+  n_estimators: 200
+  max_depth: 6
+  learning_rate: 0.1
+  #early_stopping_rounds: 30
+  random_state: 42
+  n_jobs: -1
+  eval_metric: "mlogloss" # multi-class log loss for classification, rmse for regression
+
+granularity:
+  hour:
+    target: reservation_hour
+    leakage: [reservation_seconds, reservation_half_hour]
+  half_hour:
+    target: reservation_half_hour
+    leakage: [reservation_hour, reservation_seconds]
+
+subsets:
+  "午餐 Lunch (11-14h)": { hour_min: 11, hour_max: 14 }
+  "下午茶 Afternoon (15-17h)": { hour_min: 15, hour_max: 17 }
+  "晚餐 Dinner (18-23h)": { hour_min: 18, hour_max: 23 }
+
+evaluation:
+  test_size: 0.2
+  split_strategy: random # random | temporal (random is default for tabular data, temporal is for time series)
+  cv_folds: 5 # 0 = holdout only
+  log_confusion_matrix: true
+  log_feature_importance: true
+  tolerance_slots: 1 # ±1 slot tolerance accuracy
+
+
+# tuning:                       # uncomment to enable Optuna
+#   n_trials: 50
+#   search_space:
+#     n_estimators:     { type: categorical, choices: [100, 300, 500, 1000] }
+#     max_depth:        { type: int, low: 3, high: 12 }
+#     learning_rate:    { type: float, low: 0.01, high: 0.3, log: true }
+#     min_child_weight: { type: int, low: 1, high: 10 }

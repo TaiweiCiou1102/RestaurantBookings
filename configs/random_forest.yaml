@@ -1,0 +1,34 @@
+model_params:
+  n_estimators: 200
+  max_depth: 15
+  min_samples_leaf: 5
+  random_state: 42
+  n_jobs: -1
+
+granularity:
+  hour:
+    target: reservation_hour
+    leakage: [reservation_seconds, reservation_half_hour]
+  half_hour:
+    target: reservation_half_hour
+    leakage: [reservation_hour, reservation_seconds]
+
+subsets:
+  "午餐 Lunch (11-14h)":       { hour_min: 11, hour_max: 14 }
+  "下午茶 Afternoon (15-17h)":  { hour_min: 15, hour_max: 17 }
+  "晚餐 Dinner (18-23h)":      { hour_min: 18, hour_max: 23 }
+
+evaluation:
+  test_size: 0.2
+  split_strategy: random        # random | temporal
+  cv_folds: 5                   # 0 = holdout only
+  log_confusion_matrix: true
+  log_feature_importance: true
+  tolerance_slots: 1            # ±1 slot tolerance accuracy
+
+# tuning:                       # uncomment to enable Optuna
+#   n_trials: 50
+#   search_space:
+#     n_estimators: { type: categorical, choices: [100, 200, 300, 500] }
+#     max_depth:    { type: int, low: 4, high: 20 }
+#     min_samples_leaf: { type: int, low: 2, high: 20 }
