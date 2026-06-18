@@ -9,6 +9,11 @@ wheels/
 # Virtual environments
 .venv
 
+# Secrets / env
+.env
+!.env.example
+kaggle.json
+
 # MLflow
 mlruns/
 mlflow.db

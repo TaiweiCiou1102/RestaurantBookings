@@ -1,12 +1,9 @@
 """Main ETL pipeline script for executing feature engineering transformations."""
 
-import argparse
-import logging
-from pathlib import Path
-
 import pandas as pd
 
-from src.etl._features_utils import (
+from src.etl._config import load_config
+from src.etl._utils import (
     area_restaurant_density,
     average_price,
     calculate_age,
@@ -22,14 +19,6 @@ from src.etl._features_utils import (
     weekday,
 )
 
-# Configure logging standard
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
-
-
 def transform_features(df: pd.DataFrame) -> pd.DataFrame:
     """Applies a continuous pipeline of statistical feature engineering functions.
 
@@ -39,8 +28,6 @@ def transform_features(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         The fully processed DataFrame with new engineered features.
     """
-    logger.info("Applying feature engineering pipeline.")
-    
     # Example holiday dates for Taiwan 2014
     holidays_2014 = [
         "2014-01-01", "2014-01-30", "2014-01-31", "2014-02-03", "2014-02-28", 
@@ -86,46 +73,24 @@ def transform_features(df: pd.DataFrame) -> pd.DataFrame:
         })
         .pipe(drop_columns, cols_to_drop=['booking_id', 'member_id', 'restaurant_id','booking_status','return90','min_price','max_price'])
     )
-    
-    logger.info("Feature engineering pipeline applied successfully.")
+
     return df_engineered
 
 
 def main() -> None:
     """Main execution entrypoint for feature engineering pipeline."""
-    parser = argparse.ArgumentParser(description="ETL Process: Feature Engineering")
-    parser.add_argument(
-        "--data-dir",
-        type=Path,
-        default=Path("./data"),
-        help="Root directory for data storage.",
-    )
-    args = parser.parse_args()
-
-    interim_dir = args.data_dir / "interim"
-    processed_dir = args.data_dir / "processed"
+    dirs = load_config()["dirs"]
+    interim_dir = dirs["interim"]
+    processed_dir = dirs["processed"]
 
     processed_dir.mkdir(parents=True, exist_ok=True)
 
     input_path = interim_dir / "joined_data.csv"
     output_path = processed_dir / "features_ready.csv"
 
-    try:
-        logger.info("Loading joined dataset from %s", input_path)
-        df_input = pd.read_csv(input_path, on_bad_lines="warn")
-        
-        df_feats = transform_features(df_input)
-        
-        logger.info("Saving engineered dataset to %s", output_path)
-        df_feats.to_csv(output_path, index=False)
-        logger.info("Feature engineering completed successfully.")
-        
-    except FileNotFoundError as e:
-        logger.error("Required integration dataset not found: %s", e)
-        raise
-    except Exception as e:
-        logger.error("An error occurred during feature engineering: %s", e)
-        raise
+    df_input = pd.read_csv(input_path, on_bad_lines="warn")
+    transform_features(df_input).to_csv(output_path, index=False)
+    print(f"Feature-engineered dataset → {output_path}")
 
 
 if __name__ == "__main__":

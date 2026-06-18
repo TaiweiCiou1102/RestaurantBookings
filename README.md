@@ -33,6 +33,7 @@
 ```
 RestaurantBookings/
 ├── configs/                     # 設定檔
+│   ├── etl.yaml                 #   ETL 資料來源(Kaggle) + 各階段資料夾
 │   ├── raw_data_schema.yaml     #   原始資料欄位 schema
 │   ├── regression.yaml          #   Regression 超參數設定
 │   ├── random_forest.yaml       #   Random Forest 超參數設定
@@ -45,13 +46,13 @@ RestaurantBookings/
 │       └── features_ready.csv   #   所有模型共用的起點
 │
 ├── src/
-│   ├── etl/                     # 領域知識 / 特徵工程
-│   │   ├── run_cleaning.py
-│   │   ├── run_integration.py
-│   │   ├── run_features.py
-│   │   ├── _cleaning_utils.py
-│   │   ├── _integration_utils.py
-│   │   └── _features_utils.py
+│   ├── etl/                     # 領域知識 / 特徵工程（依編號順序執行）
+│   │   ├── step0_run_download.py
+│   │   ├── step1_run_cleaning.py
+│   │   ├── step2_run_integration.py
+│   │   ├── step3_run_features.py
+│   │   ├── _config.py           # 讀取 configs/etl.yaml（路徑錨定專案根目錄）
+│   │   └── _utils.py            # 共用工具（清洗/整合/特徵）
 │   │
 │   ├── preprocessing/           # 模型專屬編碼 / 縮放
 │   │   ├── common.py            #   共用：train/test split、缺值、標準化
@@ -79,7 +80,7 @@ RestaurantBookings/
 ## 資料流
 
 ```
-raw/ ──► run_cleaning ──► interim/ ──► run_integration ──► run_features ──► processed/features_ready.csv
+kaggle ──► step0_run_download ──► raw/ ──► step1_run_cleaning ──► interim/ ──► step2_run_integration ──► step3_run_features ──► processed/features_ready.csv
                                                                                        │
                                                                                        ▼
                                                           preprocessing/{regression, tree}.py
@@ -121,12 +122,17 @@ uv sync
 
 ## 使用方式
 
+### 資料下載
+
+本專案資料使用kaggle公開競賽資料
+
 ### 跑 ETL 產生特徵
 
 ```bash
-uv run python -m src.etl.run_cleaning
-uv run python -m src.etl.run_integration
-uv run python -m src.etl.run_features
+uv run python -m src.etl.step0_run_download     # 從 Kaggle 下載原始資料（--force 可強制重抓）
+uv run python -m src.etl.step1_run_cleaning
+uv run python -m src.etl.step2_run_integration
+uv run python -m src.etl.step3_run_features
 ```
 
 ### 訓練模型
@@ -170,29 +176,62 @@ uv run mlflow ui
 
 ## 資料來源
 
-<!-- TODO: 說明資料來源
-例如：
-- 來自 Kaggle 競賽 / 公司內部資料倉儲
-- 資料時間範圍
-- 主要資料表（會員、訂單、餐廳）的關聯關係
--->
+來自 Kaggle 競賽 **[Predict Repeat Restaurant Bookings](https://www.kaggle.com/competitions/predict-repeat-restaurant-bookings)**。
+
+原始資料包含三類資料表，存放於 [`data/raw/`](data/raw/)：
+
+| 檔案                                        | 內容                                             |
+| ------------------------------------------- | ------------------------------------------------ |
+| `member.csv`                                | 會員主檔（會員等級、年齡、性別、加入日期等屬性） |
+| `restaurant.txt` / `restaurant_revised.csv` | 餐廳基本資訊                                     |
+| `train.csv` / `train.txt`                   | 訓練集訂位紀錄（含實際入座時間）                 |
+| `test.csv` / `test.txt`                     | 測試集訂位紀錄                                   |
+
+ETL 流程會將三張表 join 起來、衍生領域知識特徵（會員行為、餐廳熱門時段、節慶接近度等），輸出到 [`data/processed/features_ready.csv`](data/processed/features_ready.csv) 供所有模型共用。
 
 ## 模型表現
 
-<!-- TODO: 填入目前最佳模型的指標
-| Model         | AUC   | F1    | Notes                     |
-|---------------|-------|-------|---------------------------|
-| Regression    |       |       |                           |
-| Random Forest |       |       |                           |
-| XGBoost       |       |       |                           |
--->
+以 **`reservation_half_hour` (0-47 半小時 slot)** 為預測目標。所有模型使用相同的 `features_ready.csv` 與 train/test split。
+
+### 1. XGBoost Classifier（原始方法）
+
+把 48 個半小時 slot 視為獨立類別。
+
+| 模型             | 樣本數 (Test) |  Accuracy | F1 (weighted) |
+| ---------------- | ------------: | --------: | ------------: |
+| 全模型           |        13,270 |     0.356 |         0.342 |
+| **三分模型合併** |        13,242 | **0.481** |     **0.467** |
+
+子模型分項表現：
+
+| 子模型                 | 樣本數 |  Accuracy |        F1 |
+| ---------------------- | -----: | --------: | --------: |
+| Lunch (11-14h)         |  5,955 |     0.472 |     0.454 |
+| **Afternoon (15-17h)** |  1,533 | **0.834** | **0.820** |
+| Dinner (18-23h)        |  5,754 |     0.395 |     0.387 |
+
+### 2. XGBoost Regressor — Ordinal Regression（改善方案 C）
+
+把 slot 當成連續數值，用 `objective="reg:absoluteerror"` (MAE) 訓練，預測完 round 回整數。優點：鄰近時段錯誤 = 小錯，避免分類器塌縮到單一尖峰時段。
+
+| 模型             |  Accuracy | MAE (slots, 1 slot ≈ 30 min) | Acc ±1 slot (±30 min) | Acc ±2 slot (±1 hr) |
+| ---------------- | --------: | ---------------------------: | --------------------: | ------------------: |
+| 全模型           |     0.196 |                         3.03 |                 0.454 |               0.593 |
+| **三分模型合併** | **0.397** |                     **1.01** |             **0.780** |           **0.898** |
+
+子模型分項表現：
+
+| 子模型                 |  Accuracy | MAE (slots) | Acc ±1 slot | Acc ±2 slot |
+| ---------------------- | --------: | ----------: | ----------: | ----------: |
+| Lunch (11-14h)         |     0.331 |        1.23 |       0.721 |       0.841 |
+| **Afternoon (15-17h)** | **0.797** |    **0.44** |   **0.909** |   **0.937** |
+| Dinner (18-23h)        |     0.357 |        0.94 |       0.807 |       0.947 |
+
+### 結論
+
+- **三分模型在兩種建模方式下皆優於全模型**——以 Regressor 為例，accuracy 從 19.6% 翻倍到 39.7%、MAE 從 3.03 slot (~90 min) 收斂到 1.01 slot (~30 min)。
+- **Afternoon 時段（15-17h）最容易預測**——Regressor 在子集上達到 ±1 小時內 94% 命中率，跟資料分布相對均勻、樣本數較少但類別簡單有關。
+- **若實際情境是「推薦時段」**（README 開頭情境），Regressor 的 ±1 slot / ±2 slot 命中率更貼近商業價值——容差 ±30 分鐘已能覆蓋近 8 成的客人。
+- 詳細分析、分布直方圖、改善方案討論請見 [notebooks/xgboost.ipynb](notebooks/xgboost.ipynb)。
 
 ---
-
-## 開發者
-
-<!-- TODO: 作者 / 維護者 / 聯絡方式 -->
-
-## License
-
-<!-- TODO: 選擇授權（MIT / Apache-2.0 / Proprietary / 等） -->

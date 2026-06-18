@@ -1,0 +1,13 @@
+# ETL 全流程設定：資料來源 + 各階段資料夾
+# 所有路徑相對於專案根目錄，由 src/etl/_config.py 解析成絕對路徑。
+
+# Stage 0：從 Kaggle 下載原始資料
+download:
+  competition: predict-repeat-restaurant-bookings
+  unzip: true                 # 下載後自動解壓 zip 並刪除
+
+# 各階段資料夾
+dirs:
+  raw: data/raw               # step0 下載目標、step1 讀取
+  interim: data/interim       # step1 輸出、step2/step3 讀取
+  processed: data/processed   # step3 輸出 features_ready.csv

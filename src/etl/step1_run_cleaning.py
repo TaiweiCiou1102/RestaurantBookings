@@ -1,12 +1,9 @@
 """Main ETL pipeline script for extracting and cleaning raw data."""
 
-import argparse
-import logging
-from pathlib import Path
-
 import pandas as pd
 
-from src.etl._cleaning_utils import (
+from src.etl._config import load_config
+from src.etl._utils import (
     convert_to_category,
     fill_missing_values,
     map_categorical_values,
@@ -15,12 +12,6 @@ from src.etl._cleaning_utils import (
     trim_whitespace,
 )
 
-# Configure logging standard
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
 
 def clean_order(df: pd.DataFrame) -> pd.DataFrame:
     """Cleans the order dataset.
@@ -47,7 +38,6 @@ def clean_order(df: pd.DataFrame) -> pd.DataFrame:
         "甜蜜紀念日": "紀念日慶祝",
     }
 
-    logger.info("Applying cleaning pipeline on order data.")
     return (
         df.pipe(fill_missing_values, col_name="purpose", fill_value="Unknown")
         .pipe(parse_datetime_column, col_name="cdate")
@@ -77,7 +67,6 @@ def clean_restaurant(df: pd.DataFrame) -> pd.DataFrame:
     city_mapping = {"桃園縣": "桃園市", "%": "Unknown"}
     cityarea_mapping = {"請選擇": "Unknown"}
 
-    logger.info("Applying cleaning pipeline on restaurant data.")
     return (
         df.pipe(fill_missing_values, col_name="cityarea", fill_value="Unknown")
         .pipe(parse_datetime_column, col_name="cdate")
@@ -103,7 +92,6 @@ def clean_member(df: pd.DataFrame) -> pd.DataFrame:
     """
     member_city_mapping = {"桃園縣": "桃園市", "0": "Unknown", 0: "Unknown"}
 
-    logger.info("Applying cleaning pipeline on member data.")
     return (
         df.pipe(fill_missing_values, col_name="city", fill_value="Unknown")
         .pipe(fill_missing_values, col_name="gender", fill_value="Unknown")
@@ -122,43 +110,23 @@ def clean_member(df: pd.DataFrame) -> pd.DataFrame:
 
 def main() -> None:
     """Main execution entrypoint for data cleaning pipeline."""
-    parser = argparse.ArgumentParser(description="ETL Process: Data Cleaning")
-    parser.add_argument(
-        "--data-dir",
-        type=Path,
-        default=Path("./data"),
-        help="Root directory for data storage.",
-    )
-    args = parser.parse_args()
-
-    raw_dir = args.data_dir / "raw"
-    interim_dir = args.data_dir / "interim"
+    dirs = load_config()["dirs"]
+    raw_dir = dirs["raw"]
+    interim_dir = dirs["interim"]
 
     interim_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-        logger.info("Loading raw order data from %s", raw_dir / "train.csv")
-        order_df = pd.read_csv(raw_dir / "train.csv", sep="\t", encoding="utf-16", on_bad_lines="warn")
-        order_final = clean_order(order_df)
-        logger.info("Saving cleaned order data to %s", interim_dir / "train_silver.csv")
-        order_final.to_csv(interim_dir / "train_silver.csv", index=False, sep=",", encoding="utf-8")
+    order_df = pd.read_csv(raw_dir / "train.csv", sep="\t", encoding="utf-16", on_bad_lines="warn")
+    clean_order(order_df).to_csv(interim_dir / "train_silver.csv", index=False, sep=",", encoding="utf-8")
+    print(f"Cleaned order data → {interim_dir / 'train_silver.csv'}")
 
-        logger.info("Loading raw restaurant data from %s", raw_dir / "restaurant_revised.csv")
-        restaurant_df = pd.read_csv(raw_dir / "restaurant_revised.csv", sep="\t", encoding="utf-16", on_bad_lines="warn")
-        restaurant_final = clean_restaurant(restaurant_df)
-        logger.info("Saving cleaned restaurant data to %s", interim_dir / "restaurant_silver.csv")
-        restaurant_final.to_csv(interim_dir / "restaurant_silver.csv", index=False, sep=",", encoding="utf-8")
+    restaurant_df = pd.read_csv(raw_dir / "restaurant_revised.csv", sep="\t", encoding="utf-16", on_bad_lines="warn")
+    clean_restaurant(restaurant_df).to_csv(interim_dir / "restaurant_silver.csv", index=False, sep=",", encoding="utf-8")
+    print(f"Cleaned restaurant data → {interim_dir / 'restaurant_silver.csv'}")
 
-        logger.info("Loading raw member data from %s", raw_dir / "member.csv")
-        member_df = pd.read_csv(raw_dir / "member.csv", sep="\t", encoding="utf-16", on_bad_lines="warn")
-        member_final = clean_member(member_df)
-        logger.info("Saving cleaned member data to %s", interim_dir / "member_silver.csv")
-        member_final.to_csv(interim_dir / "member_silver.csv", index=False, sep=",", encoding="utf-8")
-
-        logger.info("Data cleaning completed successfully.")
-    except Exception as e:
-        logger.error("An error occurred during data cleaning: %s", e)
-        raise
+    member_df = pd.read_csv(raw_dir / "member.csv", sep="\t", encoding="utf-16", on_bad_lines="warn")
+    clean_member(member_df).to_csv(interim_dir / "member_silver.csv", index=False, sep=",", encoding="utf-8")
+    print(f"Cleaned member data → {interim_dir / 'member_silver.csv'}")
 
 if __name__ == "__main__":
     main()
