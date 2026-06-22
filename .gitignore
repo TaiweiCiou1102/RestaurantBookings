@@ -24,6 +24,9 @@ kaggle.json
 mlruns/
 mlflow.db
 
+# Generated profiling reports (ydata-profiling output)
+reports/*.html
+
 # Claude Code
 .claude/
 
