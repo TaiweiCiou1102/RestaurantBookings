@@ -7,8 +7,8 @@ import mlflow.sklearn
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
 
-from src.preprocessing.common import fill_missing, load_features, split_data
-from src.preprocessing.regression import preprocess_for_regression
+from src.exploration.preprocessing.common import fill_missing, load_features, split_data
+from src.exploration.preprocessing.regression import preprocess_for_regression
 
 logging.basicConfig(
     level=logging.INFO,

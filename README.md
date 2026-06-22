@@ -54,16 +54,20 @@ RestaurantBookings/
 │   │   ├── _config.py           # 讀取 configs/etl.yaml（路徑錨定專案根目錄）
 │   │   └── _utils.py            # 共用工具（清洗/整合/特徵）
 │   │
-│   ├── preprocessing/           # 模型專屬編碼 / 縮放
-│   │   ├── common.py            #   共用：train/test split、缺值、標準化
-│   │   ├── regression.py        #   One-hot encoding、drop baseline、standardize
-│   │   └── tree.py              #   Label encoding 或保留整數、不縮放
+│   ├── common/                  # 共用建模工具（exploration 與 xgboost 共用）
+│   │   └── model_utils.py       #   MLflow logging、CV、Optuna、繪圖、run 探索
 │   │
-│   └── models/                  # 訓練、評估、MLflow 紀錄
-│       ├── train_regression.py
-│       ├── train_random_forest.py
-│       ├── train_xgboost.py
-│       └── xgboost_inference.py
+│   ├── exploration/             # 【已凍結】初期多模型比較研究（見其 README）
+│   │   ├── preprocessing/       #   各模型前處理（common / regression / tree）
+│   │   ├── train_regression.py  #   已被 src/xgboost/ 取代，不再擴充
+│   │   ├── train_random_forest.py
+│   │   ├── train_xgboost.py
+│   │   └── inference.py
+│   │
+│   └── xgboost/                 # 【source of truth】選定並產品化的模型
+│       ├── preprocessing.py     #   自包含的編碼 / 縮放
+│       ├── train.py             #   訓練 + MLflow logging
+│       └── inference.py         #   推論
 │
 ├── deployment/                  # 模型部署 (MLflow serving)
 │   ├── conda.yaml               #   推論環境
@@ -83,10 +87,10 @@ RestaurantBookings/
 kaggle ──► step0_run_download ──► raw/ ──► step1_run_cleaning ──► interim/ ──► step2_run_integration ──► step3_run_features ──► processed/features_ready.csv
                                                                                        │
                                                                                        ▼
-                                                          preprocessing/{regression, tree}.py
+                                                          xgboost/preprocessing.py
                                                                                        │
                                                                                        ▼
-                                                                  models/train_*.py ──► MLflow
+                                                              xgboost/train.py ──► MLflow
                                                                                        │
                                                                                        ▼
                                                                             deployment/score.py
@@ -137,11 +141,15 @@ uv run python -m src.etl.step3_run_features
 
 ### 訓練模型
 
+選定的 XGBoost（source of truth）：
+
 ```bash
-uv run python -m src.models.train_regression
-uv run python -m src.models.train_random_forest
-uv run python -m src.models.train_xgboost
+uv run python -m src.xgboost.train --granularity hour
+uv run python -m src.xgboost.train --granularity half_hour --tune
 ```
+
+> 初期多模型比較（regression / random forest / xgboost）已凍結在 `src/exploration/`，
+> 僅供重現比較結果，不再維護。
 
 ### 查看 MLflow 實驗結果
 

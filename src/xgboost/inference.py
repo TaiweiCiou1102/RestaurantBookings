@@ -37,7 +37,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder, OrdinalEncoder
 
-from src.models._utils import find_nested_runs, load_config, resolve_granularity
+from src.common.model_utils import find_nested_runs, load_config, resolve_granularity
 from src.xgboost.preprocessing import NON_FEATURE_COLS, fill_missing, apply_saved_encoders
 
 logging.basicConfig(

@@ -19,7 +19,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from xgboost import XGBClassifier
 
-from src.models._utils import (
+from src.common.model_utils import (
     build_optuna_objective,
     load_config,
     log_evaluation_artifacts,

@@ -6,12 +6,12 @@ Two entry points:
 
 CLI usage:
     # From raw CSV (full ETL + preprocessing + predict)
-    uv run python -m src.models.xgboost_inference \\
+    uv run python -m src.exploration.inference \\
         --raw data/raw/test.csv \\
         --granularity hour
 
     # From pre-processed JSON (preprocessing + predict)
-    uv run python -m src.models.xgboost_inference \\
+    uv run python -m src.exploration.inference \\
         --input request.json \\
         --granularity hour \\
         --output predictions.json
@@ -50,9 +50,9 @@ from sklearn.preprocessing import LabelEncoder, OrdinalEncoder
 from src.etl._utils import safe_merge
 from src.etl.step1_run_cleaning import clean_order
 from src.etl.step3_run_features import transform_features
-from src.models._utils import find_nested_runs, load_config, resolve_granularity
-from src.preprocessing.common import NON_FEATURE_COLS, fill_missing
-from src.preprocessing.tree import CATEGORICAL_COLS, apply_saved_encoders
+from src.common.model_utils import find_nested_runs, load_config, resolve_granularity
+from src.exploration.preprocessing.common import NON_FEATURE_COLS, fill_missing
+from src.exploration.preprocessing.tree import CATEGORICAL_COLS, apply_saved_encoders
 
 logging.basicConfig(
     level=logging.INFO,
