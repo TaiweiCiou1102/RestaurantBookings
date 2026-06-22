@@ -52,10 +52,10 @@ DEFAULT_CONFIG = "configs/xgboost.yaml"
 # Used to map numeric indices → column names when JSON columns are integers.
 FEATURE_COLUMNS = [
     "party_size", "dining_purpose", "booked_by_gender", "prepay_satisfied",
-    "hotel_restaurant", "city_code", "city_area_code", "family_friendly",
+    "hotel_restaurant", "family_friendly",
     "accepts_credit_card", "has_parking", "outdoor_seating", "has_wifi",
     "wheelchair_accessible", "lat", "lng", "is_vip_member", "account_gender",
-    "member_city_code", "lead_time", "age", "booking_hour",
+    "lead_time", "age", "booking_hour",
     "reservation_hour", "reservation_seconds", "reservation_half_hour",
     "weekday", "avg_price", "is_holiday_vicinity", "days_from_payday",
     "popular_hour", "dinner_ratio", "restaurant_density",

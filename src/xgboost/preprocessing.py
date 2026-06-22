@@ -9,17 +9,23 @@ from sklearn.preprocessing import LabelEncoder, OrdinalEncoder
 
 logger = logging.getLogger(__name__)
 
-# Columns not used as model features
-NON_FEATURE_COLS = ["booking_time", "reservation_time", "member_birthdate"]
+# Columns not used as model features.
+# Geographic codes dropped 2026-06-22 (see docs/feature_decisions.md):
+#  - city_area_code: high-cardinality (38 cats, 65% missing), gain importance
+#    was an overfitting artifact.
+#  - city_code / member_city_code: head-to-head CV showed the model prefers
+#    continuous lat/lng over nominal codes; the codes actively hurt (codes-only
+#    scored below no-geo in every subset). lat/lng kept as the geo signal.
+NON_FEATURE_COLS = [
+    "booking_time", "reservation_time", "member_birthdate",
+    "city_area_code", "city_code", "member_city_code",
+]
 
-# String categorical columns that need label encoding for tree-based models
+# String categorical columns converted to native category dtype for XGBoost
 CATEGORICAL_COLS = [
     "dining_purpose",
     "booked_by_gender",
     "account_gender",
-    "city_code",
-    "city_area_code",
-    "member_city_code",
 ]
 
 
@@ -86,6 +92,16 @@ def fill_missing(df: pd.DataFrame, strategy: str = "median") -> pd.DataFrame:
 #  Label encoding (from tree.py)
 # ------------------------------------------------------------------
 
+def _clean_str(series: pd.Series) -> pd.Series:
+    """Normalise a column to clean strings, filling missing with 'Unknown'.
+
+    Casts via ``object`` first so it works regardless of the input dtype —
+    including columns that are already ``category`` dtype (NaN cannot be filled
+    in-place on a Categorical) or numeric with NaN.
+    """
+    return series.astype("object").fillna("Unknown").astype(str)
+
+
 def label_encode(
     df_train: pd.DataFrame,
     df_test: pd.DataFrame,
@@ -129,28 +145,79 @@ def label_encode(
     return train_out, test_out, encoders
 
 
+def encode_categoricals(
+    df_train: pd.DataFrame,
+    df_test: pd.DataFrame,
+    columns: Optional[List[str]] = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, Dict[str, pd.CategoricalDtype]]:
+    """Convert categorical columns to pandas ``category`` dtype (XGBoost native).
+
+    Unlike :func:`label_encode`, this applies **no numeric encoding**. With
+    ``enable_categorical=True`` XGBoost reads the category codes directly and
+    performs proper partition-based splits, instead of treating nominal codes
+    as an ordered axis. Categories are fitted on *train* only; values unseen in
+    train become NaN in *test*, which XGBoost handles as missing.
+
+    Args:
+        df_train: Training features.
+        df_test: Testing features.
+        columns: Columns to convert. Defaults to CATEGORICAL_COLS.
+
+    Returns:
+        Converted train, converted test, dict of fitted CategoricalDtype.
+    """
+    if columns is None:
+        columns = CATEGORICAL_COLS
+
+    train_out = df_train.copy()
+    test_out = df_test.copy()
+    cat_dtypes: Dict[str, pd.CategoricalDtype] = {}
+
+    for col in columns:
+        if col not in train_out.columns:
+            continue
+
+        # Cast via object first so this is robust to inputs that are already
+        # category dtype (e.g. re-processing inside CV) or numeric with NaN.
+        train_col = _clean_str(train_out[col]).astype("category")
+        dtype = train_col.dtype  # CategoricalDtype carrying the train category set
+
+        train_out[col] = train_col
+        # Align test to train categories; unseen values -> NaN (missing for XGBoost)
+        test_out[col] = _clean_str(test_out[col]).astype(dtype)
+
+        cat_dtypes[col] = dtype
+        logger.debug("Converted column to category dtype: %s (%d categories)", col, len(dtype.categories))
+
+    logger.info("Converted %d columns to category dtype.", len(cat_dtypes))
+    return train_out, test_out, cat_dtypes
+
+
 def apply_saved_encoders(
     df: pd.DataFrame,
-    encoders: Dict[str, OrdinalEncoder],
+    encoders: Dict[str, object],
 ) -> pd.DataFrame:
-    """Transform categorical columns using pre-fitted encoders (inference only).
+    """Transform categorical columns using pre-fitted artifacts (inference only).
 
-    Supports both OrdinalEncoder (2D) and LabelEncoder (1D) saved artifacts.
-    Unknown categories are mapped to -1.
+    Supports CategoricalDtype (native categorical, current), OrdinalEncoder, and
+    LabelEncoder (legacy) saved artifacts. For CategoricalDtype, values unseen in
+    train become NaN (missing); for the legacy encoders, unknown categories map to -1.
 
     Args:
         df: Input features.
-        encoders: Dict of column name → fitted encoder (from training).
+        encoders: Dict of column name → fitted artifact (from training).
 
     Returns:
-        DataFrame with encoded categorical columns.
+        DataFrame with categorical columns converted/encoded.
     """
     out = df.copy()
     for col, enc in encoders.items():
         if col not in out.columns:
             continue
-        out[col] = out[col].fillna("Unknown").astype(str)
-        if isinstance(enc, OrdinalEncoder):
+        out[col] = _clean_str(out[col])
+        if isinstance(enc, pd.CategoricalDtype):
+            out[col] = out[col].astype(enc)
+        elif isinstance(enc, OrdinalEncoder):
             out[col] = enc.transform(out[[col]])
         else:
             # LabelEncoder: map unseen labels to -1
@@ -162,13 +229,14 @@ def apply_saved_encoders(
 def preprocess_for_tree(
     df_train: pd.DataFrame,
     df_test: pd.DataFrame,
-) -> tuple[pd.DataFrame, pd.DataFrame, Dict[str, OrdinalEncoder]]:
-    """Full tree-based preprocessing pipeline: label encode only.
+) -> tuple[pd.DataFrame, pd.DataFrame, Dict[str, pd.CategoricalDtype]]:
+    """Full tree-based preprocessing pipeline: native categorical dtype only.
 
-    Integer columns (weekday, booking_hour, popular_hour) are kept as-is.
-    No scaling is applied.
+    Categorical columns become pandas ``category`` dtype (consumed directly by
+    XGBoost with ``enable_categorical=True``). Integer columns (weekday,
+    booking_hour, popular_hour) are kept as-is. No scaling is applied.
 
     Returns:
-        Processed train, processed test, dict of fitted encoders.
+        Processed train, processed test, dict of fitted CategoricalDtype.
     """
-    return label_encode(df_train, df_test)
+    return encode_categoricals(df_train, df_test)

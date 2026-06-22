@@ -89,7 +89,7 @@ def train_and_evaluate(
     esr = model_params.pop("early_stopping_rounds", None)
 
     # --- Optuna tuning (optional) ---------------------------------------
-    fixed_keys = {"random_state", "n_jobs", "eval_metric"}
+    fixed_keys = {"random_state", "n_jobs", "eval_metric", "enable_categorical"}
     if tune and "tuning" in config:
         import optuna
 
