@@ -34,6 +34,15 @@ online endpoint。三個子模型打包成一份 model，分流邏輯寫在 `sco
 
 ## 部署步驟
 
+> 懶人版：直接跑腳本（已封裝下列所有步驟，含冪等的 endpoint 建立與煙霧測試）
+> ```powershell
+> pwsh deployment/deploy.ps1                 # Windows PowerShell
+> # 或 Linux/CI：  bash deployment/deploy.sh
+> ```
+> 預設 `rg_taiwei / TaiweiTestAML / Standard_DS2_v2`。常用旗標：
+> `-RebuildBundle`（先從 MLflow 重建 bundle）、`-ModelVersion 2`（升版）、
+> `-Teardown`（刪除 endpoint 停止計費）。手動逐步如下：
+
 ```bash
 # 0) 產生 model bundle（需先有訓練好的 MLflow run）
 uv run python deployment/export_bundle.py

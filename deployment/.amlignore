@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 test_score.py
 export_bundle.py
+deploy.ps1
+deploy.sh
+README.md
