@@ -1,241 +1,226 @@
-"""Azure ML scoring script for the XGBoost reservation-hour classifier.
+"""Azure ML scoring script for the three-subset XGBoost reservation model.
 
-This module provides the required `init()` and `run()` entry points for
-Azure Machine Learning online endpoints. It loads an XGBoost model and 
-associated Scikit-Learn encoders to predict reservation time slots.
+The productionized model is **three sub-models** (lunch / afternoon / dinner),
+each predicting a half-hour reservation slot within its meal period. This script
+loads all three from a single registered model folder and routes each input row
+to the right sub-model by ``reservation_hour``.
+
+Azure ML entry points:
+    init()  — load every sub-model + encoders once at container startup
+    run()   — route rows, predict per subset, merge, return JSON
+
+The model folder (``AZUREML_MODEL_DIR``) is produced by ``export_bundle.py`` and
+has this layout::
+
+    model_bundle/
+    ├── lunch/      { model.ubj, encoders.joblib, target_encoder.joblib }
+    ├── afternoon/  { ... }
+    ├── dinner/     { ... }
+    └── routing.json
+
+Input JSON (Azure ML standard format)::
+
+    {
+      "input_data": {
+        "columns": ["reservation_hour", "party_size", "dining_purpose", ...],
+        "index":   [0, 1],
+        "data":    [[19, 2, "生日慶祝", ...], ...]
+      }
+    }
+
+``reservation_hour`` is required for routing (which meal period). It is used only
+to pick the sub-model and is dropped before prediction (it is a leakage feature).
+
+Output JSON::
+
+    {
+      "predictions": {
+        "columns": ["reservation_half_hour", "time_range", "subset", "probability"],
+        "index":   [0, 1],
+        "data":    [[39, "19:30-19:59", "dinner", 0.42], ...]
+      }
+    }
+Rows whose ``reservation_hour`` falls outside every meal period get a null
+prediction with subset ``"_unmatched"``.
 """
 
 import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import joblib
+import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder, OrdinalEncoder
 from xgboost import XGBClassifier
 
-# ─── Module-Level Constants ───────────────────────────────────────────────────
-
-# Fallback to current directory if AZUREML_MODEL_DIR is not set (e.g., local testing).
-_MODEL_DIR = Path(os.getenv("AZUREML_MODEL_DIR", Path(__file__).parent.resolve()))
-
-_MODEL_FILENAME = "model.ubj"
-_X_ENCODER_FILENAME = "encoders.joblib"
-_Y_ENCODER_FILENAME = "target_encoder.joblib"
-
-# Must match exactly what was used during training.
-_CATEGORICAL_COLS = frozenset([
-    "dining_purpose",
-    "booked_by_gender",
-    "account_gender",
-    "city_code",
-    "city_area_code",
-    "member_city_code",
-])
-
-# Columns to safely ignore if present in the inference payload.
-_COLS_TO_DROP = frozenset([
-    "has_google_id",
-    "has_yahoo_id",
-    "has_weibo_id",
-])
-
-# ─── Global State ─────────────────────────────────────────────────────────────
+# ─── Paths ─────────────────────────────────────────────────────────────────
+# AZUREML_MODEL_DIR points at the registered model folder in the container.
+# Fall back to the local bundle for offline testing.
+_MODEL_ROOT = Path(os.getenv("AZUREML_MODEL_DIR", Path(__file__).parent.resolve()))
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
-# Global variables required by Azure ML's init/run architecture.
-_MODEL: Optional[XGBClassifier] = None
-_X_ENCODER: Optional[Dict[str, Any]] = None
-_Y_ENCODER: Optional[LabelEncoder] = None
+# ─── Global state (populated by init) ───────────────────────────────────────
+_ROUTING: Optional[dict] = None
+# {subset_key: (model, encoders, target_encoder)}
+_SUBSETS: Dict[str, Tuple[XGBClassifier, Dict[str, Any], LabelEncoder]] = {}
 
 
-# ─── Helper Functions ─────────────────────────────────────────────────────────
+# ─── Helpers ────────────────────────────────────────────────────────────────
 
-def _parse_input_json(raw_data: str) -> pd.DataFrame:
-    """Parses the Azure ML input JSON string into a Pandas DataFrame.
+def _find_bundle_dir(root: Path) -> Path:
+    """Locate the folder containing routing.json under *root* (handles the extra
+    nesting Azure ML adds, e.g. AZUREML_MODEL_DIR/<model_name>/model_bundle)."""
+    if (root / "routing.json").exists():
+        return root
+    matches = list(root.rglob("routing.json"))
+    if not matches:
+        raise FileNotFoundError(f"routing.json not found under {root}")
+    return matches[0].parent
 
-    Args:
-        raw_data: A JSON string containing the request payload.
 
-    Returns:
-        A pandas DataFrame constructed from the parsed JSON.
+def _clean_str(series: pd.Series) -> pd.Series:
+    """Normalise to clean strings, filling missing with 'Unknown' (matches training)."""
+    return series.astype("object").fillna("Unknown").astype(str)
 
-    Raises:
-        KeyError: If 'input_data', 'columns', or 'data' are missing.
-        json.JSONDecodeError: If the input is not valid JSON.
+
+def _apply_saved_encoders(df: pd.DataFrame, encoders: Dict[str, Any]) -> pd.DataFrame:
+    """Transform categorical columns with the artifacts saved at training time.
+
+    Supports CategoricalDtype (native categorical, current), OrdinalEncoder and
+    LabelEncoder (legacy). Mirrors src/xgboost/preprocessing.apply_saved_encoders.
     """
-    body = json.loads(raw_data)["input_data"]
+    out = df.copy()
+    for col, enc in encoders.items():
+        if col not in out.columns:
+            continue
+        out[col] = _clean_str(out[col])
+        if isinstance(enc, pd.CategoricalDtype):
+            out[col] = out[col].astype(enc)
+        elif isinstance(enc, OrdinalEncoder):
+            out[col] = enc.transform(out[[col]])[:, 0]
+        else:  # LabelEncoder: unseen -> -1
+            known = set(enc.classes_)
+            out[col] = out[col].apply(lambda v: int(enc.transform([v])[0]) if v in known else -1)
+    return out
+
+
+def _slot_to_time_range(slot: int) -> str:
+    """Half-hour slot index -> readable range, e.g. 39 -> '19:30-19:59'."""
+    hour, half = divmod(int(slot), 2)
+    minute = half * 30
+    return f"{hour:02d}:{minute:02d}-{hour:02d}:{minute + 29:02d}"
+
+
+def _parse_input(raw: str) -> pd.DataFrame:
+    body = json.loads(raw)["input_data"]
+    return pd.DataFrame(data=body["data"], columns=body["columns"], index=body.get("index"))
+
+
+# ─── Azure ML entry points ──────────────────────────────────────────────────
+
+def init() -> None:
+    """Load routing metadata and every sub-model once at startup."""
+    global _ROUTING, _SUBSETS
+
+    bundle = _find_bundle_dir(_MODEL_ROOT)
+    _logger.info("Loading model bundle from %s", bundle)
+
+    with open(bundle / "routing.json", encoding="utf-8") as f:
+        _ROUTING = json.load(f)
+
+    _SUBSETS = {}
+    for key in _ROUTING["subsets"]:
+        sub_dir = bundle / key
+        model = XGBClassifier(enable_categorical=True)
+        model.load_model(sub_dir / "model.ubj")
+        encoders = joblib.load(sub_dir / "encoders.joblib")
+        target_enc = joblib.load(sub_dir / "target_encoder.joblib")
+        _SUBSETS[key] = (model, encoders, target_enc)
+        _logger.info("Loaded sub-model '%s'", key)
+
+    _logger.info("Initialization complete (%d sub-models).", len(_SUBSETS))
+
+
+def _predict_subset(rows: pd.DataFrame, key: str) -> pd.DataFrame:
+    """Predict slot + confidence for the rows routed to one sub-model."""
+    model, encoders, target_enc = _SUBSETS[key]
+    drop_cols = (
+        _ROUTING["non_feature_cols"] + _ROUTING["leakage"] + [_ROUTING["target"]]
+    )
+    X = rows.drop(columns=[c for c in drop_cols if c in rows.columns], errors="ignore")
+    X = _apply_saved_encoders(X, encoders)
+    # Align to the exact training feature order; unseen/missing cols -> NaN (missing).
+    if _ROUTING.get("feature_columns"):
+        X = X.reindex(columns=_ROUTING["feature_columns"])
+
+    proba = model.predict_proba(X)
+    enc_pred = proba.argmax(axis=1)
+    slots = target_enc.inverse_transform(enc_pred)
+    conf = proba.max(axis=1)
+
     return pd.DataFrame(
-        data=body["data"],
-        columns=body["columns"],
-        index=body.get("index")
+        {
+            "reservation_half_hour": [int(s) for s in slots],
+            "time_range": [_slot_to_time_range(s) for s in slots],
+            "subset": key,
+            "probability": [round(float(c), 6) for c in conf],
+        },
+        index=rows.index,
     )
 
 
-def _convert_class_to_time_range(class_label: int) -> str:
-    """Converts a class label to a human-readable time range string.
+def run(raw_data: str) -> str:
+    """Route each row to its meal-period sub-model, predict, and merge results."""
+    if not _SUBSETS or _ROUTING is None:
+        raise RuntimeError("Model not initialized. Check init() logs.")
 
-    Args:
-        class_label: The integer class label from the model prediction.
+    df = _parse_input(raw_data)
 
-    Returns:
-        A string representing the time range.
-        - class < 24  -> hour granularity (e.g., 19 -> "19:00-19:59")
-        - class >= 24 -> half-hour slot   (e.g., 39 -> "19:30-19:59")
-    """
-    if class_label >= 24:
-        hour, half = divmod(class_label, 2)
-        minute = half * 30
-        return f"{hour:02d}:{minute:02d}-{hour:02d}:{minute + 29:02d}"
-    return f"{class_label:02d}:00-{class_label:02d}:59"
+    route_col = _ROUTING["routing_column"]
+    if route_col not in df.columns:
+        raise ValueError(
+            f"Input must include '{route_col}' to route rows to the correct "
+            f"meal-period sub-model."
+        )
 
+    hours = pd.to_numeric(df[route_col], errors="coerce")
+    parts = []
+    matched = pd.Series(False, index=df.index)
 
-def _build_output_json(proba_df: pd.DataFrame) -> str:
-    """Serializes the probability DataFrame to an AML-compliant JSON string.
+    for key, meta in _ROUTING["subsets"].items():
+        mask = hours.between(meta["hour_min"], meta["hour_max"])
+        if mask.any():
+            parts.append(_predict_subset(df.loc[mask], key))
+            matched |= mask
 
-    Args:
-        proba_df: DataFrame containing prediction probabilities where 
-            columns are class labels and rows are instances.
+    # Rows that matched no meal period -> null prediction.
+    if (~matched).any():
+        unmatched = df.loc[~matched]
+        _logger.warning("%d row(s) outside all meal periods -> unmatched", len(unmatched))
+        parts.append(
+            pd.DataFrame(
+                {
+                    "reservation_half_hour": None,
+                    "time_range": None,
+                    "subset": "_unmatched",
+                    "probability": None,
+                },
+                index=unmatched.index,
+            )
+        )
 
-    Returns:
-        A JSON string formatted for Azure ML endpoint response.
-    """
-    time_columns = [_convert_class_to_time_range(int(c)) for c in proba_df.columns]
+    result = pd.concat(parts).reindex(df.index)
+
     payload = {
         "predictions": {
-            "columns": time_columns,
-            "index": proba_df.index.tolist(),
-            "data": [[round(val, 6) for val in row] for row in proba_df.values.tolist()],
+            "columns": ["reservation_half_hour", "time_range", "subset", "probability"],
+            "index": result.index.tolist(),
+            "data": result.where(pd.notnull(result), None).values.tolist(),
         }
     }
     return json.dumps(payload, ensure_ascii=False)
-
-
-def _encode_features(features_df: pd.DataFrame, encoders: Dict[str, Any]) -> pd.DataFrame:
-    """Applies fitted encoders to categorical columns.
-
-    Args:
-        features_df: The input features DataFrame.
-        encoders: A dictionary mapping column names to fitted scikit-learn encoders.
-
-    Returns:
-        A new DataFrame with categorical columns encoded. Unseen categories 
-        are mapped to -1 or appropriately handled.
-    """
-    encoded_df = features_df.copy()
-    
-    for col_name, encoder in encoders.items():
-        if col_name not in encoded_df.columns:
-            continue
-            
-        # Ensure column is treated as string and handle missing values
-        encoded_df[col_name] = encoded_df[col_name].fillna("Unknown").astype(str)
-        
-        if isinstance(encoder, OrdinalEncoder):
-            # Flatten the 2D array returned by OrdinalEncoder to a 1D Series
-            encoded_df[col_name] = encoder.transform(encoded_df[[col_name]])[:, 0]
-        else:
-            # Fallback for LabelEncoder: map unseen labels to -1
-            known_classes = set(encoder.classes_)
-            encoded_df[col_name] = encoded_df[col_name].apply(
-                lambda val: int(encoder.transform([val])[0]) if val in known_classes else -1
-            )
-            
-    return encoded_df
-
-
-# ─── Azure ML Entry Points ────────────────────────────────────────────────────
-
-def init() -> None:
-    """Loads the model and encoders once at container startup.
-
-    This function initializes the global state required for inference.
-    
-    Raises:
-        FileNotFoundError: If any of the required artifact files are missing.
-        RuntimeError: If model loading fails.
-    """
-    global _MODEL, _X_ENCODER, _Y_ENCODER
-
-    model_path = _MODEL_DIR / _MODEL_FILENAME
-    x_encoder_path = _MODEL_DIR / _X_ENCODER_FILENAME
-    y_encoder_path = _MODEL_DIR / _Y_ENCODER_FILENAME
-
-    try:
-        _logger.info("Loading model from %s", model_path)
-        _MODEL = XGBClassifier()
-        _MODEL.load_model(model_path)
-
-        _logger.info("Loading feature encoder from %s", x_encoder_path)
-        _X_ENCODER = joblib.load(x_encoder_path)
-
-        _logger.info("Loading target encoder from %s", y_encoder_path)
-        _Y_ENCODER = joblib.load(y_encoder_path)
-
-    except Exception as e:
-        _logger.exception("Failed to initialize model or encoders.")
-        raise RuntimeError(f"Initialization failed: {e}") from e
-
-    _logger.info("Initialization complete successfully.")
-
-
-def run(raw_data: str) -> str:
-    """Processes a single inference request.
-
-    Args:
-        raw_data: A JSON string conforming to the AML expected input schema.
-
-    Returns:
-        A JSON string containing the predicted probabilities.
-
-    Raises:
-        RuntimeError: If global dependencies are not initialized, or if 
-            the model's output shape mismatches the target encoder's classes.
-    """
-    if _MODEL is None or _X_ENCODER is None or _Y_ENCODER is None:
-        raise RuntimeError("Global model or encoders are not initialized. Check init() logs.")
-
-    # 1. Parse and clean input data
-    df = _parse_input_json(raw_data)
-    
-    columns_to_drop = [col for col in _COLS_TO_DROP if col in df.columns]
-    if columns_to_drop:
-        df = df.drop(columns=columns_to_drop)
-
-    # 2. Encode features
-    x_features = _encode_features(df, _X_ENCODER)
-
-    # 3. Drop unexpected object-dtype columns to prevent XGBoost errors
-    object_cols = x_features.select_dtypes(include="object").columns.tolist()
-    if object_cols:
-        _logger.warning("Dropping unexpected object-dtype columns: %s", object_cols)
-        x_features = x_features.drop(columns=object_cols)
-
-    # 4. Predict probabilities
-    probabilities = _MODEL.predict_proba(x_features)
-    num_predicted_classes = probabilities.shape[1]
-
-    # 5. Validate alignment between Model and Target Encoder
-    if hasattr(_MODEL, "classes_") and len(_MODEL.classes_) == num_predicted_classes:
-        hour_labels = [int(h) for h in _MODEL.classes_]
-    elif hasattr(_Y_ENCODER, "classes_") and len(_Y_ENCODER.classes_) == num_predicted_classes:
-        hour_labels = [int(h) for h in _Y_ENCODER.classes_]
-    else:
-        # FAIL-FAST: Instead of silently passing bad data, we raise a clear error.
-        # This prevents downstream systems from processing mismatched schema data.
-        encoder_len = len(_Y_ENCODER.classes_) if hasattr(_Y_ENCODER, "classes_") else "Unknown"
-        error_msg = (
-            f"Artifact mismatch error! The XGBoost model predicted {num_predicted_classes} classes, "
-            f"but the target encoder (_Y_ENCODER) contains {encoder_len} classes. "
-            "Please verify that the model and encoders were generated from the same training run."
-        )
-        _logger.error(error_msg)
-        raise RuntimeError(error_msg)
-
-    # 6. Format output
-    proba_df = pd.DataFrame(probabilities, columns=hour_labels, index=df.index)
-    return _build_output_json(proba_df)

@@ -1,11 +1,10 @@
-# Conda environment for deployment/score.py
-# Source reference: mlruns/2/models/m-858ece605d8449a7a921a8385df78186/artifacts/conda.yaml
+# Conda environment for deployment/score.py (three-subset XGBoost endpoint)
 #
-# Trimmed to only what score.py actually imports:
-#   joblib, numpy, pandas, scikit-learn (LabelEncoder, OrdinalEncoder), xgboost
+# Pins match the training run (xgboost 3.2.0, scikit-learn 1.8.0, python 3.12.2)
+# so the pickled encoders / saved boosters load identically.
 #
-# Removed from MLflow-generated env (not used by score.py):
-#   mlflow, psutil, pyarrow, scipy
+# azureml-inference-server-http is REQUIRED for Azure ML online endpoints — it is
+# the HTTP server that hosts init()/run(). Without it the deployment won't start.
 
 name: restaurant-score-env
 channels:
@@ -19,3 +18,4 @@ dependencies:
     - pandas==2.3.3
     - scikit-learn==1.8.0
     - xgboost==3.2.0
+    - azureml-inference-server-http

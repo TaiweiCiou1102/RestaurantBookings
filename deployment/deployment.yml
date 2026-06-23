@@ -1,0 +1,38 @@
+# Deployment that hosts the three sub-models behind one endpoint.
+#
+# Prereqs (one-off):
+#   az extension add -n ml
+#   az login
+#   az account set --subscription <SUB_ID>
+#   az configure --defaults workspace=<WS> group=<RG> location=<REGION>
+#
+# Register the bundle as ONE custom model, then create endpoint + deployment:
+#   az ml model create --name resv-3split --version 1 \
+#       --path deployment/model_bundle --type custom_model
+#   az ml online-endpoint create   -f deployment/endpoint.yml
+#   az ml online-deployment create -f deployment/deployment.yml --all-traffic
+#
+# `model` references the registered custom model (the whole model_bundle folder).
+# At runtime AZUREML_MODEL_DIR points at it and score.py loads all three sub-models.
+$schema: https://azuremlschemas.azureedge.net/latest/managedOnlineDeployment.schema.json
+name: blue
+endpoint_name: resv-3split-endpoint
+
+model: azureml:resv-3split:1
+
+code_configuration:
+  code: ./
+  scoring_script: score.py
+
+environment:
+  # Lightweight inference base image; conda adds our pinned deps + the
+  # azureml-inference-server-http server.
+  image: mcr.microsoft.com/azureml/minimal-py312-inference:latest
+  conda_file: conda.yaml
+
+instance_type: Standard_DS3_v2
+instance_count: 1
+
+request_settings:
+  request_timeout_ms: 30000
+  max_concurrent_requests_per_instance: 1

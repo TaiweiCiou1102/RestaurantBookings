@@ -1,0 +1,8 @@
+# Keep the uploaded scoring "code" minimal. The model bundle is registered
+# separately as the model asset (azureml:resv-3split), so it must NOT also be
+# uploaded as code. Build/test artifacts are not needed in the container either.
+model_bundle/
+__pycache__/
+*.pyc
+test_score.py
+export_bundle.py

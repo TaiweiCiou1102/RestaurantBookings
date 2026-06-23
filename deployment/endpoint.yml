@@ -1,0 +1,7 @@
+# Managed online endpoint for the three-subset reservation model.
+# Create with:  az ml online-endpoint create -f deployment/endpoint.yml
+#
+# Endpoint name must be unique within the Azure region.
+$schema: https://azuremlschemas.azureedge.net/latest/managedOnlineEndpoint.schema.json
+name: resv-3split-endpoint
+auth_mode: key

@@ -1,13 +1,16 @@
-"""Pydantic schemas for the AML scoring endpoint.
+"""Pydantic schemas for the three-subset AML scoring endpoint.
 
 Request format mirrors example_input.json:
     {
       "input_data": {
-        "columns": ["party_size", "dining_purpose", ...],
+        "columns": ["reservation_hour", "party_size", "dining_purpose", ...],
         "index":   [0, 1, 2],
-        "data":    [[3, "家人用餐", "F", ...], ...]
+        "data":    [[19, 3, "家人用餐", "F", ...], ...]
       }
     }
+
+`reservation_hour` is required: score.py uses it to route each row to the
+lunch / afternoon / dinner sub-model, then drops it before prediction.
 
 Usage:
     req = ScoringRequest.model_validate_json(raw_json)
@@ -16,7 +19,7 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 import pandas as pd
 from pydantic import BaseModel, model_validator
@@ -25,7 +28,15 @@ from pydantic import BaseModel, model_validator
 # ── Single booking row (typed, for documentation / validation) ─────────────
 
 class BookingRecord(BaseModel):
-    """One row of input features — types reflect what the model was trained on."""
+    """One row of input features — types reflect what the model was trained on.
+
+    Matches the 25 model features plus ``reservation_hour`` (routing only).
+    Geographic codes (city_code / city_area_code / member_city_code) were dropped
+    from the model on 2026-06-22 — see docs/feature_decisions.md.
+    """
+
+    # Routing (which meal period) — not a model feature, dropped before predict
+    reservation_hour:     int
 
     # Booking details
     party_size:           int
@@ -35,8 +46,6 @@ class BookingRecord(BaseModel):
 
     # Restaurant attributes
     hotel_restaurant:     float
-    city_code:            str
-    city_area_code:       str
     family_friendly:      float
     accepts_credit_card:  float
     has_parking:          float
@@ -49,7 +58,6 @@ class BookingRecord(BaseModel):
     # Member attributes
     is_vip_member:        float
     account_gender:       str
-    member_city_code:     str
 
     # Derived / temporal features
     lead_time:            float
@@ -97,16 +105,19 @@ class ScoringRequest(BaseModel):
     input_data: InputData
 
     def to_dataframe(self) -> pd.DataFrame:
-        """Return a DataFrame ready to pass into score.run() / input_encode()."""
+        """Return a DataFrame ready to pass into score.run()."""
         return self.input_data.to_dataframe()
 
 
 # ── Response format ────────────────────────────────────────────────────────
 
 class PredictionData(BaseModel):
-    columns: list[int]          # actual hour labels, e.g. [9, 10, 11, ..., 22]
+    # columns: ["reservation_half_hour", "time_range", "subset", "probability"]
+    columns: list[str]
     index:   list[int]
-    data:    list[list[float]]  # per-class probabilities, one row per input row
+    # one row per input: [slot, "HH:MM-HH:MM", subset, probability]
+    # null for rows outside every meal period (subset == "_unmatched")
+    data:    list[list[Optional[Any]]]
 
 
 class ScoringResponse(BaseModel):
