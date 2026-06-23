@@ -25,6 +25,26 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+#  MLflow setup
+# ---------------------------------------------------------------------------
+
+DEFAULT_TRACKING_URI = "sqlite:///mlflow.db"
+
+
+def init_tracking(uri: str = DEFAULT_TRACKING_URI) -> None:
+    """Point MLflow at the project's tracking backend.
+
+    Run metadata lives in ``mlflow.db`` (SQLite); artifacts live under
+    ``./mlruns``. Without this call, ``MlflowClient()`` defaults to the
+    ``./mlruns`` file store, whose per-run ``meta.yaml`` is absent here, so
+    no runs are discoverable even though the artifacts exist on disk. Call
+    once (from the project root) before any MLflow read/write.
+    """
+    mlflow.set_tracking_uri(uri)
+    logger.info("MLflow tracking URI: %s", uri)
+
+
+# ---------------------------------------------------------------------------
 #  Config helpers
 # ---------------------------------------------------------------------------
 

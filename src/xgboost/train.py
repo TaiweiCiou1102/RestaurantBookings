@@ -21,6 +21,7 @@ from xgboost import XGBClassifier
 
 from src.common.model_utils import (
     build_optuna_objective,
+    init_tracking,
     load_config,
     log_evaluation_artifacts,
     resolve_granularity,
@@ -213,6 +214,7 @@ def main() -> None:
     df = fill_missing(df, strategy="drop")
 
     # --- MLflow parent run ----------------------------------------------
+    init_tracking()  # write to sqlite:///mlflow.db so runs are discoverable later
     mlflow.set_experiment("xgboost")
 
     with mlflow.start_run(run_name=f"xgb_{args.granularity}"):

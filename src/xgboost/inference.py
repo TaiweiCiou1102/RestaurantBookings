@@ -37,7 +37,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder, OrdinalEncoder
 
-from src.common.model_utils import find_nested_runs, load_config, resolve_granularity
+from src.common.model_utils import find_nested_runs, init_tracking, load_config, resolve_granularity
 from src.xgboost.preprocessing import NON_FEATURE_COLS, fill_missing, apply_saved_encoders
 
 logging.basicConfig(
@@ -215,6 +215,7 @@ def run_inference(
         Series of predictions, indexed like *df*.
         Rows that cannot be routed will have NaN.
     """
+    init_tracking()  # metadata lives in sqlite:///mlflow.db, not the ./mlruns file store
     config = load_config(config_path)
     target, leakage = resolve_granularity(config, GRANULARITY)
 
