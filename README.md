@@ -169,12 +169,22 @@ uv run mlflow ui
 
 ### 模型推論 / 部署
 
-<!-- TODO: 補充部署方式
-例如：
-- MLflow Model Serving 啟動指令
-- API endpoint 規格
-- 範例請求 / 回應（可參考 docs/RestaurantBooking.postman_collection.json）
--->
+三分模型部署成**一個** Azure ML managed online endpoint（三個子模型打包成一份 model，
+依 `reservation_hour` 在 `score.py` 內分流）。完整說明見 [deployment/README.md](deployment/README.md)。
+
+```bash
+# 1) 從 MLflow 匯出三分模型 bundle
+uv run python deployment/export_bundle.py
+
+# 2) 本地驗證（不需 Azure）
+uv run python deployment/test_score.py
+
+# 3) 部署到 Azure ML
+az ml model create --name resv-3split --version 1 \
+    --path deployment/model_bundle --type custom_model
+az ml online-endpoint create   -f deployment/endpoint.yml
+az ml online-deployment create -f deployment/deployment.yml --all-traffic
+```
 
 ---
 
