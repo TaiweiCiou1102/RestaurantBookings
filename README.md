@@ -206,6 +206,66 @@ uv run mlflow ui
 
 ETL 流程會將三張表 join 起來、衍生領域知識特徵（會員行為、餐廳熱門時段、節慶接近度等），輸出到 [`data/processed/features_ready.csv`](data/processed/features_ready.csv) 供所有模型共用。
 
+## 使用的資料欄位（特徵）
+
+`features_ready.csv` 共 34 欄，模型實際使用其中 **25 個特徵**（其餘為預測目標、洩漏欄位與已排除欄位，見下）。
+標示 \[類別\] 者為類別型欄位，交由 XGBoost 原生類別處理（`enable_categorical`）；其餘為數值 / 0–1 布林。
+特徵的詳細產生邏輯見 [docs/feature_engineering_definitions.md](docs/feature_engineering_definitions.md)。
+
+### 訂位行為（來自訂位紀錄）
+
+| 欄位                     | 說明                                                   |
+| ------------------------ | ------------------------------------------------------ |
+| `party_size`             | 訂位人數                                               |
+| `dining_purpose` \[類別\] | 用餐目的（家人用餐 / 朋友聚餐 / 甜蜜紀念日 / 生日慶祝）  |
+| `booked_by_gender` \[類別\] | 訂位者性別                                            |
+| `prepay_satisfied`       | 是否滿足預付訂金條件（0/1）                             |
+| `lead_time`              | 提前訂位天數（預定用餐時間 − 實際下訂時間）             |
+| `booking_hour`           | 實際下訂當下的小時（0–23）                              |
+| `weekday`                | 用餐當日星期幾                                          |
+
+### 顧客 / 會員屬性
+
+| 欄位                    | 說明                                       |
+| ----------------------- | ------------------------------------------ |
+| `account_gender` \[類別\] | 會員性別                                  |
+| `age`                   | 用餐當下年齡（由會員生日計算）             |
+| `is_vip_member`         | 是否為 VIP 會員（0/1）                      |
+
+### 餐廳屬性
+
+| 欄位                    | 說明                            |
+| ----------------------- | ------------------------------- |
+| `hotel_restaurant`      | 是否附屬於飯店（0/1）           |
+| `family_friendly`       | 是否適合家庭聚餐（0/1）         |
+| `accepts_credit_card`   | 是否接受信用卡（0/1）           |
+| `has_parking`           | 是否有停車場（0/1）             |
+| `outdoor_seating`       | 是否有戶外座位（0/1）           |
+| `has_wifi`              | 是否提供 WiFi（0/1）            |
+| `wheelchair_accessible` | 是否為無障礙空間（0/1）         |
+| `lat` / `lng`           | 餐廳經緯度                      |
+| `avg_price`             | 平均價位（(price1 + price2) / 2）|
+
+### 衍生領域知識特徵（ETL `step3_run_features`）
+
+| 欄位                  | 說明                                          |
+| --------------------- | --------------------------------------------- |
+| `is_holiday_vicinity` | 是否接近國定假日（前後 7 天內）                |
+| `days_from_payday`    | 距離發薪日的天數                              |
+| `popular_hour`        | 該餐廳最熱門的訂位時段                        |
+| `dinner_ratio`        | 該餐廳晚餐時段訂位佔比                        |
+| `restaurant_density`  | 該地區餐廳密度（衡量競爭 / 選擇多樣性）        |
+
+### 預測目標與刻意排除的欄位
+
+| 欄位                                                  | 角色   | 原因                                                                                  |
+| ----------------------------------------------------- | ------ | ------------------------------------------------------------------------------------- |
+| `reservation_half_hour`                               | 目標   | 預測的用餐時段（半小時 slot，0–47）                                                    |
+| `reservation_hour`                                    | 排除   | 用來把資料分流到三個子模型，但對 half-hour 目標屬**洩漏**（同源時間）                   |
+| `reservation_seconds`                                 | 排除   | 與目標同源時間，屬**洩漏**                                                             |
+| `booking_time` / `reservation_time` / `member_birthdate` | 排除   | 原始日期時間，已萃取為上述特徵                                                          |
+| `city_code` / `city_area_code` / `member_city_code`   | 排除   | 地理代碼；模型偏好連續的 `lat`/`lng`，代碼反而有害（見 [docs/feature_decisions.md](docs/feature_decisions.md)） |
+
 ## 模型表現
 
 以 **`reservation_half_hour` (0-47 半小時 slot)** 為預測目標。所有模型使用相同的 `features_ready.csv` 與 train/test split。
